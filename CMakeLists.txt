@@ -10,6 +10,9 @@ find_package(glm CONFIG REQUIRED)
 
 add_executable(Basic3DCube WIN32
     main.cpp
+    menu.cpp
+    camera.cpp
+    keyboard-overlay.cpp
     imgui/imgui_impl_glfw.cpp
     imgui/imgui_impl_opengl3.cpp
 )

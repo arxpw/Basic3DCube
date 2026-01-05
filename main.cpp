@@ -15,6 +15,10 @@
 
 #include <iostream>
 
+#include "menu.h"
+#include "camera.h"
+#include "keyboard-overlay.h"
+
 const char* vertexShaderSource = R"(
 #version 330 core
 layout (location = 0) in vec3 aPos;
@@ -54,6 +58,8 @@ float cubeVertices[] = {
      0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f,-0.5f
 };
 
+const char* windowTitle = "3D Cube with ImGui Controls";
+
 GLuint compileShader(GLenum type, const char* src)
 {
     GLuint shader = glCreateShader(type);
@@ -68,12 +74,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_SAMPLES, 4); // Enable 4x MSAA
 
-    GLFWwindow* window = glfwCreateWindow(1280, 720, "3D Cube + ImGui", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(1280, 720, windowTitle, nullptr, nullptr);
     glfwMakeContextCurrent(window);
 
     gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
     glEnable(GL_DEPTH_TEST);
+    glEnable(GL_MULTISAMPLE); // Enable multisampling for anti-aliasing
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -103,17 +111,82 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
     float cubeScale = 1.0f;
 
+    // FPS counter variables
+    double lastTime = glfwGetTime();
+    double lastFrameTime = lastTime;
+    int frameCount = 0;
+    float fps = 0.0f;
+
+    // FPS limiter variables
+    const char* fpsOptions[] = { "30", "60", "90", "120", "244" };
+    int fpsLimits[] = { 30, 60, 90, 120, 244 };
+    int currentFpsIndex = 1; // Default to 60 FPS
+    double targetFrameTime = 1.0 / fpsLimits[currentFpsIndex];
+
+    // Create camera
+    Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
+
+    // Mouse tracking variables
+    double lastMouseX = 0.0, lastMouseY = 0.0;
+    bool firstMouse = true;
+
     while (!glfwWindowShouldClose(window))
     {
+        double frameStartTime = glfwGetTime();
+        float deltaTime = static_cast<float>(frameStartTime - lastFrameTime);
+        lastFrameTime = frameStartTime;
+
         glfwPollEvents();
+
+        // Process camera input
+        camera.processInput(window, deltaTime);
+
+        // Process mouse look (only when left mouse button is held and ImGui is not being used)
+        ImGuiIO& io = ImGui::GetIO();
+        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS && !io.WantCaptureMouse)
+        {
+            double mouseX, mouseY;
+            glfwGetCursorPos(window, &mouseX, &mouseY);
+
+            if (firstMouse)
+            {
+                lastMouseX = mouseX;
+                lastMouseY = mouseY;
+                firstMouse = false;
+            }
+
+            float xoffset = static_cast<float>(mouseX - lastMouseX);
+            float yoffset = static_cast<float>(lastMouseY - mouseY); // Reversed: y-coordinates go from bottom to top
+
+            lastMouseX = mouseX;
+            lastMouseY = mouseY;
+
+            camera.processMouseMovement(xoffset, yoffset);
+        }
+        else
+        {
+            firstMouse = true;
+        }
+
+        // Calculate FPS
+        frameCount++;
+        double currentTime = glfwGetTime();
+        if (currentTime - lastTime >= 1.0)
+        {
+            fps = frameCount / (currentTime - lastTime);
+            frameCount = 0;
+            lastTime = currentTime;
+        }
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        ImGui::Begin("Cube Controls");
-        ImGui::SliderFloat("Size", &cubeScale, 0.1f, 3.0f);
-        ImGui::End();
+        // Render menu
+        renderMenu(cubeScale, fps, currentFpsIndex, fpsOptions, fpsLimits, targetFrameTime);
+
+        // Render keyboard overlay
+        renderKeyboardOverlay(window);
 
         glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -121,7 +194,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
         glUseProgram(shader);
 
         glm::mat4 model = glm::scale(glm::mat4(1.0f), glm::vec3(cubeScale));
-        glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0, 0, -3));
+        glm::mat4 view = camera.getViewMatrix();
         glm::mat4 proj = glm::perspective(glm::radians(45.0f), 1280.0f / 720.0f, 0.1f, 100.0f);
         glm::mat4 mvp = proj * view * model;
 
@@ -135,6 +208,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window);
+
+        // FPS limiting
+        double frameEndTime = glfwGetTime();
+        double frameTime = frameEndTime - frameStartTime;
+        if (frameTime < targetFrameTime)
+        {
+            double sleepTime = targetFrameTime - frameTime;
+            // Use busy-wait for more precise timing
+            while (glfwGetTime() - frameEndTime < sleepTime) {}
+        }
     }
 
     ImGui_ImplOpenGL3_Shutdown();
